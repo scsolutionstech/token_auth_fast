@@ -12,7 +12,7 @@ app = FastAPI()
 
 models.Base.metadata.create_all(bind=engine)
 
-SECRET_KEY = "jagdishprajapati"
+SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 1
@@ -42,20 +42,22 @@ def create_refresh_token(data: dict):
     expires_delta = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     return create_token(data, expires_delta, token_type="refresh")
 
-def verify_token(token: str, token_type: str):
+
+def verify_token(token: str, token_type: str, secret_key: str, algorithm: str):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, secret_key, algorithms=[algorithm])
         if payload.get("type") != token_type:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
         username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token ")
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: Missing subject")
         print(f"Token verified successfully for user: {username}")
-        return username
+        return payload  
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    except JWTError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {str(e)}")
+
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     username = verify_token(token, token_type="access")
@@ -81,8 +83,8 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = models.User(username=user.username, email=user.email, password=hashed_password)
     db.add(db_user)
     db.commit()
-    db.refresh(db_user)
-    return {"message": "Registration complete", "user": db_user}
+    db.refresh(db_user)  
+    return db_user 
 
 @app.post("/token", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -90,24 +92,23 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     if not user or not utils.verify_password(form_data.password, user.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
-
-    access_token = access_token(user.id, db)
-    if access_token:
-        return {"message": "Token is already created", "access_token": access_token, "token_type": "bearer"}
-    
     access_token = create_access_token(data={"sub": user.username})
     refresh_token = create_refresh_token(data={"sub": user.username})
-    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "Enter your Token"}
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
 
 @app.post("/refresh", response_model=schemas.Token)
 def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
-    username = verify_token(refresh_token, token_type="refresh")
-    user = db.query(models.User).filter(models.User.username == username).first()
+    try:
+        user_data = verify_token(refresh_token, token_type="refresh", secret_key=SECRET_KEY, algorithm=ALGORITHM)
+    except HTTPException as e:
+        raise e
+    user = db.query(models.User).filter(models.User.username == user_data["sub"]).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
-    
     new_access_token = create_access_token(data={"sub": user.username})
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    new_refresh_token = create_refresh_token(data={"sub": user.username})
+    return {"access_token": new_access_token, "refresh_token":new_refresh_token, "token_type": "bearer"}
 
 @app.get("/users/me", response_model=schemas.UserOut)
 def read_users_me(current_user: schemas.UserOut = Depends(get_current_user)):
