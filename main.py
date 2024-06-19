@@ -94,13 +94,8 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     
     access_token = create_access_token(data={"user_id": user.id})
     
-    db_token =models.Token(user_id=user.id,token=access_token)
-    db.add(db_token)
     return {"access_token": access_token, "token_type": "bearer"}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 #generate refresh tokens
@@ -116,18 +111,15 @@ def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
 
     new_refresh_token = create_refresh_token(data={"user_id": user.id})
 
-    db_token = models.Token(user_id=user.id, token=new_refresh_token, expires_at=datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    db.add(db_token)
-    db.commit()
 
     return { "refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
-@app.get("/subscription-keys", response_model=schemas.SubscriptionBase)
-def check_subscription_key(subscription_key: str, db: Session = Depends(get_db)):
-    subscription = db.query(models.Subscription).filter(models.Subscription.key == subscription_key).first()
+@app.post("/subscription-keys/{key}")
+def check_subscription_key(key: str, db: Session = Depends(get_db)):
+    subscription = db.query(models.Subscription).filter(models.Subscription.key == key).first()
     if subscription:
-        return subscription
+        return {"message": "Key matched successfully"}
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription key not found")
 
