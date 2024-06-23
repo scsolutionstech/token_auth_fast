@@ -20,13 +20,16 @@ REFRESH_TOKEN_EXPIRE_DAYS = 1
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-#create token
+
+
+# create token
 def create_token(data: dict, expires_delta: timedelta, token_type: str):
     to_encode = data.copy()
     to_encode.update({"type": token_type})
@@ -36,104 +39,148 @@ def create_token(data: dict, expires_delta: timedelta, token_type: str):
     return encoded_jwt
 
 
-#generate access token
+# generate access token
 def create_access_token(data: dict):
     expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return create_token(data, expires_delta, token_type="access")
 
-#generate refresh tokens
+
+# generate refresh tokens
 def create_refresh_token(data: dict):
     expires_delta = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     return create_token(data, expires_delta, token_type="refresh")
 
-#verify tokens
+
+# verify tokens
 def verify_token(token: str, token_type: str, secret_key: str, algorithm: str):
     try:
         payload = jwt.decode(token, secret_key, algorithms=[algorithm])
         if payload.get("type") != token_type:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
+            )
         user_id: int = payload.get("user_id")
         if not user_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: Missing user ID")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: Missing user ID",
+            )
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
+        )
     except JWTError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {str(e)}"
+        )
 
-    
 
-#check user valid or not
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    payload = verify_token(token, token_type="access", secret_key=SECRET_KEY, algorithm=ALGORITHM)
+# check user valid or not
+def get_current_user(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+):
+    payload = verify_token(
+        token, token_type="access", secret_key=SECRET_KEY, algorithm=ALGORITHM
+    )
     user = db.query(models.User).filter(models.User.id == payload["user_id"]).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
+        )
     return user
-#register user data api
+
+
+# register user data api
 @app.post("/register", response_model=schemas.UserOut)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(
-        (models.User.username == user.username) | (models.User.email == user.email)
-    ).first()
-    
+    existing_user = (
+        db.query(models.User)
+        .filter(
+            (models.User.username == user.username) | (models.User.email == user.email)
+        )
+        .first()
+    )
+
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this username or email already exists")
+            detail="User with this username or email already exists",
+        )
 
-    hashed_password = hash_password(user.password)  
-    db_user = models.User(username=user.username, email=user.email, password=hashed_password)
+    hashed_password = hash_password(user.password)
+    db_user = models.User(
+        username=user.username, email=user.email, password=hashed_password
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
 
 
-
 # token api
 @app.post("/token", response_model=schemas.TokenOut)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+):
+    user = (
+        db.query(models.User).filter(models.User.username == form_data.username).first()
+    )
     if not user or not utils.verify_password(form_data.password, user.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
+
     access_token = create_access_token(data={"user_id": user.id})
-    
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-
-#generate refresh tokens api
+# generate refresh tokens api
 @app.post("/refresh", response_model=schemas.TokenOut)
 def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
     try:
-        payload = verify_token(refresh_token, token_type="refresh", secret_key=SECRET_KEY, algorithm=ALGORITHM)
+        payload = verify_token(
+            refresh_token,
+            token_type="refresh",
+            secret_key=SECRET_KEY,
+            algorithm=ALGORITHM,
+        )
     except HTTPException as e:
         raise e
 
     user = db.query(models.User).filter(models.User.id == payload["user_id"]).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
+        )
 
     new_refresh_token = create_refresh_token(data={"user_id": user.id})
     return {"refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
-#match subscription keys api
+# match subscription keys api
 @app.post("/subscription-keys/{key}")
 def check_subscription_key(key: str, db: Session = Depends(get_db)):
-    subscription = db.query(models.Subscription).filter(models.Subscription.key == key).first()
+    subscription = (
+        db.query(models.Subscription).filter(models.Subscription.key == key).first()
+    )
+    print(subscription)
     if subscription:
-        return {"message": "Key matched successfully"}
+        return schemas.SubscriptionBase.from_orm(subscription)
     else:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription key not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription key not found"
+        )
 
-#show user details api
+
+# show user details api
 @app.get("/users/me", response_model=schemas.UserOut)
 def read_users_me(current_user: schemas.UserOut = Depends(get_current_user)):
     return current_user
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
