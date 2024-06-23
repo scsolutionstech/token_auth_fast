@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
+
 # Schema for user registration and output
 class UserCreate(BaseModel):
     username: str
@@ -17,6 +18,7 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True  # Updated from orm_mode to from_attributes
 
+
 # Token schema for responses
 class Token(BaseModel):
     access_token: str
@@ -29,6 +31,7 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str
 
+
 class SubscriptionBase(BaseModel):
     key: str
     created_date: datetime
@@ -38,6 +41,8 @@ class SubscriptionBase(BaseModel):
 
     class Config:
         orm_mode = True
+        from_attributes = True
 
-    class Config:
-        from_attributes = True  
+class TokenPayload(BaseModel):
+    sub: str = None
+    exp: int = None
